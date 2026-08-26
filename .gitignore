@@ -1,0 +1,17 @@
+# Claude Code — ignore personal local state, keep the committed guard hook
+.claude/settings.local.json
+
+# FreeCAD backups
+*.FCBak
+
+# Session-in-progress snapshots (timestamped working state, not committed)
+*.Session-*.FCStd
+
+# Slicer output for cost analysis (regenerable)
+gcode/*
+
+# macOS
+.DS_Store
+
+# Python
+__pycache__/

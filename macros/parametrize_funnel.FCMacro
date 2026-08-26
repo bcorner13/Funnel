@@ -1,0 +1,110 @@
+"""parametrize_funnel — bind Funnel.FCStd's literal dimensions to Params.FCStd.
+
+Idempotent: safe to re-run. Creates Params.FCStd (VarSet-only doc) if it doesn't exist,
+adds the 10 Funnel Params if missing, and binds Sketch's 12 dimensional constraints plus
+Revolution.Angle to them via cross-document expressions (<<Params>>#VarSet.Name). No
+geometry is edited — only constraint *values* move from literal numbers to expressions on
+the existing constraints/property. See plan.md for the full parameter table and rationale.
+"""
+
+import FreeCAD as App
+import os
+
+PROJECT_DIR = "/Users/bradleycorner/Documents/3dPrinting/Commercial License/Funnels"
+FUNNEL_PATH = os.path.join(PROJECT_DIR, "Funnel.FCStd")
+PARAMS_PATH = os.path.join(PROJECT_DIR, "Params.FCStd")
+
+# --- Params.FCStd: VarSet doc ---
+params_doc = None
+for d in App.listDocuments().values():
+    if d.Label == "Params":
+        params_doc = d
+        break
+if params_doc is None:
+    params_doc = App.newDocument("Params")
+    params_doc.Label = "Params"
+
+vs = params_doc.getObject("VarSet")
+if vs is None:
+    vs = params_doc.addObject("App::VarSet", "VarSet")
+    vs.Label = "VarSet"
+
+PARAMS = [
+    # (name, type, default, doc)
+    ("FunnelHeight", "App::PropertyLength", 40.0, "Overall height, bowl base to rim top"),
+    ("RimOuterRadius", "App::PropertyLength", 40.0, "Outer radius of the flared rim before wall thickness"),
+    ("WallThickness", "App::PropertyLength", 2.0, "Uniform shell wall thickness"),
+    ("SpoutRadius", "App::PropertyLength", 15.0, "Outer radius of the straight spout section"),
+    ("SpoutHeight", "App::PropertyLength", 14.0, "Height of the straight spout section"),
+    ("NeckBlendRadius", "App::PropertyLength", 1.0, "Blend offset where spout meets bowl wall"),
+    ("RimFilletRadius", "App::PropertyLength", 1.0, "Fillet radius at the top-outer rim corner"),
+    ("RimBeadHeight", "App::PropertyLength", 1.2, "Height of the rim drip-edge bead detail"),
+    ("RimBeadWidth", "App::PropertyLength", 0.4, "Flat width of the rim drip-edge bead detail"),
+    ("RevolveAngle", "App::PropertyAngle", 360.0, "Revolution sweep angle"),
+]
+
+for name, ptype, default, doc in PARAMS:
+    if name not in vs.PropertiesList:
+        vs.addProperty(ptype, name, "Funnel", doc)
+        setattr(vs, name, default)
+
+params_doc.recompute()
+
+# Must be saved to disk before another document can create a cross-document
+# expression link to it (FreeCAD raises "Linked document not saved" otherwise).
+if not params_doc.FileName:
+    params_doc.saveAs(PARAMS_PATH)
+else:
+    params_doc.save()
+
+# --- Funnel.FCStd: bind constraints/property to Params ---
+funnel_doc = None
+for d in App.listDocuments().values():
+    if d.FileName == FUNNEL_PATH or d.Label == "Funnel":
+        funnel_doc = d
+        break
+if funnel_doc is None:
+    funnel_doc = App.openDocument(FUNNEL_PATH)
+
+sketch = funnel_doc.getObject("Sketch")
+revolution = funnel_doc.getObject("Revolution")
+
+# constraint index -> Params name (see plan.md PARAMETERS table)
+SKETCH_BINDINGS = {
+    7: "RimOuterRadius",
+    8: "WallThickness",
+    9: "FunnelHeight",
+    13: "SpoutHeight",
+    14: "SpoutRadius",
+    23: "WallThickness",
+    25: "NeckBlendRadius",
+    26: "RimBeadHeight",
+    30: "WallThickness",
+    31: "RimFilletRadius",
+    49: "RimBeadWidth",
+    50: "RimBeadWidth",
+}
+
+bound_paths = {p for p, e in sketch.ExpressionEngine}
+for idx, pname in SKETCH_BINDINGS.items():
+    path = "Constraints[%d]" % idx
+    if path not in bound_paths:
+        sketch.setExpression(path, "<<Params>>#VarSet.%s" % pname)
+
+rev_bound = {p for p, e in revolution.ExpressionEngine}
+if "Angle" not in rev_bound:
+    revolution.setExpression("Angle", "<<Params>>#VarSet.RevolveAngle")
+
+funnel_doc.recompute()
+
+# --- Save ---
+params_doc.save()
+funnel_doc.save()
+
+shape = revolution.Shape
+bb = shape.BoundBox
+print("Parametrization complete.")
+print("BoundBox: %.4f x %.4f x %.4f" % (bb.XLength, bb.YLength, bb.ZLength))
+print("Volume: %.6f" % shape.Volume)
+print("Valid: %s" % shape.isValid())
+print("Sketch.FullyConstrained: %s" % sketch.FullyConstrained)
